@@ -1,0 +1,192 @@
+# miniapp-decoded
+
+> 用 Web 技术栈还原微信小程序的双线程架构：**Web Worker 当 JSCore，iframe 当 WebView，一个主页面当 Native**。
+>
+> 配套博客：《微信小程序底层原理深解：从双线程架构到 Skyline 渲染引擎》。
+
+## 一分钟跑起来
+
+```bash
+# 需要 Node >= 16，pnpm >= 8（如未安装：npm i -g pnpm）
+pnpm install
+pnpm start
+```
+
+`pnpm start` 会自动：
+
+1. 如果检测到各包还没构建产物，逐个跑 `pnpm --filter <pkg> run build`
+2. 并行起 4 个静态服务（native / ui / logic / components）
+3. 等端口就绪后自动打开浏览器 `http://127.0.0.1:3077/native/index.html`
+
+你看到的效果是一个模拟 iPhone 外壳，点击"微信"图标 → 小程序列表 → 点"抖音" → 进入一个用 `<view>{{text}}</view>` 写的假小程序。点击文字会触发 `setData`，文本末尾会追加 `!`。
+
+想看实时热更新源码？另开一个终端：
+
+```bash
+pnpm dev    # 4 个包的 webpack --watch 并行跑
+```
+
+## 这个项目在讲什么
+
+小程序的双线程架构官方文档只有结论，没有白盒实现。这个项目用浏览器里现成的能力把整个架构"实装"一遍，**让你能单步调试每一个跨线程消息**：
+
+| 博客里的概念 | 真机实现 | 这里的对应 |
+|---|---|---|
+| 渲染线程（WebView） | iOS WKWebView / Android XWeb | `<iframe>` + `ui/` SDK |
+| 逻辑线程（JSCore/V8） | 独立 JS 引擎，无 DOM | `Web Worker` + `logic/` SDK |
+| Native 中转 | 微信客户端 | `native/` 这个 Web 应用 |
+| WeixinJSBridge | iOS messageHandlers / Android @JavascriptInterface | `window.JSBridge` 对象 + `mitt` 事件总线 |
+| 小程序编译产物 | `WAService.js` / `WAWebview.js` / `app-service.js` | `compile/` 包输出的 `logic.js` / `view.js` / `style.css` / `config.json` |
+| Exparser（仿 Shadow DOM） | 微信基础库自研组件系统 | Vue 2 + 自定义 `<ui-view>` 组件（教学简化版）|
+| PageFrame | 预热页面容器 | `native/pageframe/index.html` 预加载 Vue + ui SDK + components |
+| `App()` / `Page()` 全局 | JSCore 全局注入 | `logic/src/globalApi/index.js` 挂到 `global` 上 |
+| `setData` 跨线程 | WeixinJSBridge.publish | `message.send({type:'updateModule'})` |
+
+## 仓库结构
+
+```
+miniapp-decoded/
+├── native/          # 原生容器：Device → Application → MiniAppSandbox → Bridge → WebView + JSCore
+├── logic/           # 逻辑层 SDK：编译后会作为 Worker 脚本被 native 下发
+├── ui/              # 渲染层 SDK：编译后被 pageframe.html 引入
+├── components/      # 基础组件库（<ui-view> 等）：模拟 Exparser
+├── compile/         # 编译器：wxml/wxss/js → view.js/style.css/logic.js
+├── minimal-demo/    # 最小 demo：只保留 Worker+iframe+postMessage 的骨架
+├── scripts/         # 一键启动、vendor 拷贝、compile demo 脚手架
+├── pnpm-workspace.yaml
+└── package.json
+```
+
+## 端口布局
+
+| 服务 | 端口 | 作用 |
+|---|---|---|
+| `native` | 3077 | 入口页面、pageframe、小程序资源（`/mini_resource/:appId/`） |
+| `logic_sdk` | 3100 | 逻辑层基础 SDK（给 Worker fetch 用） |
+| `ui_sdk` | 3200 | 渲染层基础 SDK（给 iframe 用 `<script>` 引入） |
+| `components` | 3600 | Vue.js 运行时 + `<ui-view>` 组件 |
+
+跨端口通信都走 `window.postMessage`（主线程↔iframe）和 `worker.postMessage`（主线程↔Worker）。
+
+## 一次完整点击链路
+
+博客里画的那张"点击 → setData → 渲染"时序图，在这里你可以实打实地打点看：
+
+```
+[iframe]             [native 主线程]         [Worker]
+ click                     │                    │
+  │ window.JSBridge        │                    │
+  │ .onReceiveUIMessage────►                    │
+  │   type: trrigerEvent   │                    │
+  │                        ├─ jscore.postMessage┤
+  │                        │                    │ runtimeManager.trrigerEvent
+  │                        │                    │   → page.viewTap()
+  │                        │                    │   → this.setData({...})
+  │                        │◄─ Worker.postMessage│
+  │                        │   type: updateModule│
+  │                        ├─ webview.postMessage│
+  │ onReceiveNativeMessage ◄                    │
+  │   Vue.set(viewModule, key, data[key])       │
+  │   → 渲染层重渲染                              │
+```
+
+## 命令清单
+
+| 命令 | 作用 |
+|---|---|
+| `pnpm install` | 安装依赖（pnpm workspace 会自动去重 webpack/babel 等重复依赖） |
+| `pnpm start` | **推荐**：自动 build + serve + 打开浏览器 |
+| `pnpm build` | 只编译所有子包 |
+| `pnpm dev` | 监听所有子包源码，webpack watch 模式 |
+| `pnpm serve` | 只启服务（不 build） |
+| `pnpm compile:demo` | 演示"编译器"：把 `native/apps/douyin-src/` 的 wxml/wxss/js 编译成 `native/apps/douyin/` 里的运行时产物 |
+| `pnpm clean` | 清理所有产物目录 |
+| `pnpm clean:all` | 连 `node_modules` 一起清 |
+
+## 想深入学什么？
+
+- 点击如何跨两个线程 → 看 `native/src/core/bridge/index.js`
+- Worker 怎么假装自己是 JSCore → 看 `native/src/core/jscore/index.js`
+- `Page({ data, onLoad, setData, ...})` 如何被变成实例 → 看 `logic/src/runtimeManager/Page.js`
+- wxml 如何变成 Vue render 函数 → 看 `compile/src/compile/wxml/`
+- 多页面（多 WebView）栈怎么叠的 → 看 `native/src/core/miniAppSandbox/miniAppSandbox.js` 和 `Application.presentView`
+
+想看最小 demo（抛开所有 SDK/编译器）：见 [minimal-demo/README.md](./minimal-demo/README.md)。
+
+## H5 模拟的省略与权衡
+
+本项目复现的是**架构层面的消息流**，不是**运行时层面的性能/隔离特征**。以下这些点是真机有、但 H5 没法等价（或刻意省略）的部分，每一条都附上"为什么省"。
+
+### 1. 渲染层用 Vue 替代 Exparser
+
+- **真机**：微信自研的 Exparser —— 仿 Shadow DOM 的组件系统，自定义元素、自实现生命周期、自实现虚拟 DOM Diff。
+- **这里**：Vue 2 + 自定义 `<ui-view>`，直接让 `compile/` 把 wxml 编成 Vue 的 `render` 函数。
+- **为什么省**：Exparser 是十万行级别的自研基础库，复现成本极高；而本项目的教学目标是"讲清楚双线程消息流"，不是"重写一个组件系统"。Vue 刚好提供了"模板编译 + 响应式更新 + 自定义组件"这三件套，几行胶水代码就能把编译产物跑起来，把精力留给 bridge/jscore/webview 这些真正的主角。
+- **代价**：看到的"wxml → render 函数 AST"是 Vue 的产物，不是小程序真机产物；`<scroll-view>`/`<swiper>`/`Component()` 等组件系统能力全部缺失。
+
+### 2. `setData` 没有做 data diff / patch
+
+- **真机**：逻辑层持有一份 data 副本，`setData` 后做 **diff**，只把变化字段序列化发给渲染层；渲染层拿到 patch 再走 Exparser 的虚拟 DOM 更新。
+- **这里**：每次 `setData` 把整份 `this.data` 直接 `postMessage` 过去，渲染层 `Vue.set(viewModule, key, data[key])` 粗暴覆盖（见 `logic/src/runtimeManager/Page.js` 与 `ui/src/runtimeManager/index.js`）。
+- **为什么省**：diff 算法本身要实现一遍（或引入 deep-diff 之类依赖），还要在渲染层把 patch 应用回响应式对象；对理解"为什么 setData 是异步的、为什么要跨线程"没有增量收益，反而模糊焦点。
+- **代价**：复现不了"大 `setData` 导致卡顿"这种真机经典性能问题，也看不到 data diff 带来的优化效果。
+
+### 3. 跨线程通信没有真实序列化开销
+
+- **真机**：JSCore ↔ WebView 消息要走 **JSON 序列化 + Native Bridge**，这是性能瓶颈的主要来源。
+- **这里**：
+  - `worker.postMessage` 走浏览器的 structured clone，有序列化但比真机便宜得多；
+  - `iframe` 方向甚至根本**没用 `postMessage`**，直接 `window.frames[name].JSBridge.onReceiveNativeMessage(msg)` 跨 iframe 调函数（见 `native/src/core/webview/webview.js`），相当于同进程直接函数调用，**连一次 clone 都省了**。
+- **为什么省**：同源 iframe 下 `window.frames[name]` 就能拿到子窗口的 JS 上下文，直接调函数写起来最直观；真要走 `postMessage` 得再套一层异步和监听，对演示消息流向没帮助。
+- **代价**：测不出"跨线程通信开销"的真实体感，因此也无法用这个 demo 论证"为什么不要频繁 setData 小数据"。
+
+### 4. 没有进程隔离
+
+- **真机**：WebView 进程和 JSCore 进程**不是同一个进程**，一边崩溃不会拖死另一边。
+- **这里**：iframe 和 Worker 都是主页面的子资源，同属一个浏览器进程；主页面还能通过 `window.frames[name]` 直接访问 iframe 的 JS 上下文。
+- **为什么省**：**浏览器平台原生不提供进程级隔离能力**。Web Worker 连独立线程都是"尽力而为"，iframe 的 Site Isolation 也由浏览器决定，开发者无法强制。这不是偷懒，是平台限制。
+- **代价**：这个 demo 不能复现"某个页面脚本死循环不会卡住小程序导航栏"这类真机特性。
+
+### 5. `wx.*` 原生 API 全部未实现
+
+- **真机**：`wx.login`、`wx.request`、`wx.getUserInfo`、`wx.scanCode`…… 由微信客户端用原生能力实现，通过 WeixinJSBridge 暴露给逻辑层。
+- **这里**：只实现了"注册 App/Page/消息桥接"，没有任何 `wx.xxx`。
+- **为什么省**：这些 API 的本质是"宿主客户端能力封装"，每一个都需要一套独立的 mock（网络、摄像头、扫码、登录态…）。项目目标是讲**双线程架构**，不是讲**宿主 API 封装**——这是两个独立话题，混在一起反而讲不清楚。
+- **代价**：跑不了任何依赖 `wx.*` 的真实业务代码，只能跑纯 `setData` 的 demo。
+
+### 6. 组件和指令覆盖度极低
+
+- **这里只支持**：`<view>`、`bindtap`、`setData` 驱动的文本更新。
+- **不支持**：`<scroll-view>` / `<swiper>` / `<picker>` / `<input>`、`wx:for` / `wx:if` 等复杂指令、`Component()` 自定义组件、`behaviors`、插槽、样式隔离等。
+- **为什么省**：每加一个组件/指令都要同时改 `compile/`（wxml 编译规则）、`components/`（运行时组件）、`ui/`（渲染层 runtime），工作量是乘法关系；而骨架走通后，加组件只是"再照葫芦画瓢一遍"，边际收益递减。
+- **代价**：只能作为原理 demo，不能当小程序引擎用。
+
+### 7. Skyline 渲染模式完全不模拟
+
+- **真机**：Skyline 是微信后来推出的"绕过 WebView 的原生渲染管线"，类似 Flutter，直接用 C++ 绘制，逻辑层仍然是 JSCore。
+- **这里**：没有任何 Skyline 相关实现。
+- **为什么省**：Skyline 的核心是"用自研原生渲染替代 WebView"，而 Web 平台上**不存在"非 WebView 的渲染后端"**，这是**根本性的平台能力缺失**，不是省不省的问题。
+- **代价**：博客里讲 Skyline 的部分，只能停留在"原理说明"，没有对应的可运行 demo。
+
+### 一张表总结
+
+| 特性 | 真机 | 本项目 | 原因 |
+|---|---|---|---|
+| 渲染层 | Exparser | Vue 2 | 复现成本极高，偏离教学目标 |
+| setData | diff + patch | 整份覆盖 | 对理解消息流无增量收益 |
+| 跨线程通信 | JSON 序列化 + Native Bridge | postMessage / 直接调函数 | 同源 iframe 下直接调更直观 |
+| 进程隔离 | WebView / JSCore 分进程 | 同进程 | 浏览器平台不提供该能力 |
+| `wx.*` API | 宿主客户端实现 | 未实现 | 是独立话题，混讲反而讲不清 |
+| 组件 / 指令 | 全量 | 仅 `<view>` + `bindtap` | 边际收益递减 |
+| Skyline | 原生渲染管线 | 不模拟 | Web 平台无对等能力 |
+
+> 一句话：**这个 demo 用来理解"为什么小程序是双线程、为什么 setData 异步、为什么要 PageFrame 预热"是够的；用来分析"小程序为什么快/慢"则不够——那些问题的答案藏在被省略的部分里。**
+
+## 注意事项
+
+- 这是**教学级实现**，不追求覆盖小程序所有特性；具体省略了哪些、为什么省，见上方[H5 模拟的省略与权衡](#h5-模拟的省略与权衡)一节。
+- 渲染层用 Vue 替代真机的 Exparser，**不等于**真机就是用 Vue —— 只是用它快速模拟一个"仿 Shadow DOM + 模板渲染"的系统。
+
+## License
+
+MIT
