@@ -20,7 +20,7 @@ export function sleep(time) {
 export function closest(node, className) {
   let current = node;
 
-  while(current && current.classList && !current.classList.contains(className)) {
+  while (current && current.classList && !current.classList.contains(className)) {
     current = current.parentNode;
   }
 

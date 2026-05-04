@@ -2,12 +2,12 @@
 
 小程序的"编译器"。把开发者写的 `wxml/wxss/js/json` 四件套编译成运行时可以直接加载的四件套：
 
-| 源文件 | 产物 | 作用 |
-|---|---|---|
-| `app.json` / `pages/**/*.json` | `dist/config.json` | Native 启动时读取，确定入口页、导航栏颜色等 |
-| `pages/**/*.wxml` | `dist/view.js` | 渲染层（iframe）里执行，生成 Vue 的 `render` 函数 |
-| `pages/**/*.wxss` + `app.wxss` | `dist/style.css` | 渲染层加载的样式表（加了 `data-v-xxx` scope + `rpx→rem`） |
-| `app.js` / `pages/**/*.js` | `dist/logic.js` | 逻辑层（Worker）里通过 `importScripts` 加载 |
+| 源文件                         | 产物               | 作用                                                      |
+| ------------------------------ | ------------------ | --------------------------------------------------------- |
+| `app.json` / `pages/**/*.json` | `dist/config.json` | Native 启动时读取，确定入口页、导航栏颜色等               |
+| `pages/**/*.wxml`              | `dist/view.js`     | 渲染层（iframe）里执行，生成 Vue 的 `render` 函数         |
+| `pages/**/*.wxss` + `app.wxss` | `dist/style.css`   | 渲染层加载的样式表（加了 `data-v-xxx` scope + `rpx→rem`） |
+| `app.js` / `pages/**/*.js`     | `dist/logic.js`    | 逻辑层（Worker）里通过 `importScripts` 加载               |
 
 ## 对应博客里的哪一段？
 

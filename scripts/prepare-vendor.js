@@ -9,10 +9,7 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const TARGET = path.join(ROOT, 'components/lib/vue.js');
 
-const CANDIDATES = [
-  'components/node_modules/vue/dist/vue.js',
-  'node_modules/vue/dist/vue.js',
-];
+const CANDIDATES = ['components/node_modules/vue/dist/vue.js', 'node_modules/vue/dist/vue.js'];
 
 function main() {
   if (fs.existsSync(TARGET)) {
@@ -23,9 +20,7 @@ function main() {
   const source = CANDIDATES.map((p) => path.join(ROOT, p)).find(fs.existsSync);
 
   if (!source) {
-    console.error(
-      '[vendor] 未找到 vue.js 源文件。请先在 components 包内安装 vue@2：',
-    );
+    console.error('[vendor] 未找到 vue.js 源文件。请先在 components 包内安装 vue@2：');
     console.error('  pnpm --filter components add vue@2');
     process.exit(1);
   }

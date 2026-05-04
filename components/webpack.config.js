@@ -1,6 +1,6 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
-const MiniCssExtractPlugin = require("mini-css-extract-plugin");
+const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 
 module.exports = {
   mode: 'development',
@@ -11,7 +11,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, './public'),
     filename: 'js/index.js',
-    assetModuleFilename: 'images/[hash][ext][query]'
+    assetModuleFilename: 'images/[hash][ext][query]',
   },
   resolve: {
     extensions: ['.js', '.scss', '.css'],
@@ -32,10 +32,10 @@ module.exports = {
                 '@babel/preset-env',
                 {
                   targets: {
-                    browsers: ['cover 99.5%']
-                  }
-                }
-              ]
+                    browsers: ['cover 99.5%'],
+                  },
+                },
+              ],
             ],
             plugins: [
               [
@@ -43,20 +43,20 @@ module.exports = {
                 {
                   corejs: { version: 3 },
                 },
-              ]
-            ]
+              ],
+            ],
           },
-        }
+        },
       },
 
       {
         test: /\.html$/i,
-        loader: "html-loader",
+        loader: 'html-loader',
       },
 
       {
         test: /\.css$/,
-        loader: 'css-loader'
+        loader: 'css-loader',
       },
 
       {
@@ -71,14 +71,14 @@ module.exports = {
           },
           {
             loader: 'sass-loader',
-          }
-        ]
+          },
+        ],
       },
-    ]
+    ],
   },
   plugins: [
     new MiniCssExtractPlugin({
-      filename: "css/index.css",
+      filename: 'css/index.css',
     }),
   ],
 };

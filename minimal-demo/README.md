@@ -4,11 +4,11 @@
 
 核心对照关系：
 
-| 真机 | 这里的模拟 |
-| ---- | ---- |
-| 渲染线程（WebView） | `iframe.html`（一个独立 iframe，有 DOM）|
-| 逻辑线程（JSCore/V8） | `core.js`（跑在 Web Worker 里，没有 DOM） |
-| Native 中转（WeixinJSBridge） | `native.html` 里两端挂的 `JSBridge` 对象 |
+| 真机                          | 这里的模拟                                |
+| ----------------------------- | ----------------------------------------- |
+| 渲染线程（WebView）           | `iframe.html`（一个独立 iframe，有 DOM）  |
+| 逻辑线程（JSCore/V8）         | `core.js`（跑在 Web Worker 里，没有 DOM） |
+| Native 中转（WeixinJSBridge） | `native.html` 里两端挂的 `JSBridge` 对象  |
 
 通信链路：
 

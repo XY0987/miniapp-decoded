@@ -24,10 +24,10 @@ module.exports = {
           loader: 'babel-loader',
           options: {
             babelrc: true,
-            configFile: path.resolve(__dirname, '../.babelrc')
+            configFile: path.resolve(__dirname, '../.babelrc'),
           },
-        }
+        },
       },
-    ]
-  }
+    ],
+  },
 };

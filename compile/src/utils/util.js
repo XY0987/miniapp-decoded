@@ -10,5 +10,5 @@ function uuid(len = 10) {
 }
 
 module.exports = {
-  uuid
+  uuid,
 };

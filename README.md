@@ -30,17 +30,17 @@ pnpm dev    # 4 个包的 webpack --watch 并行跑
 
 小程序的双线程架构官方文档只有结论，没有白盒实现。这个项目用浏览器里现成的能力把整个架构"实装"一遍，**让你能单步调试每一个跨线程消息**：
 
-| 博客里的概念 | 真机实现 | 这里的对应 |
-|---|---|---|
-| 渲染线程（WebView） | iOS WKWebView / Android XWeb | `<iframe>` + `ui/` SDK |
-| 逻辑线程（JSCore/V8） | 独立 JS 引擎，无 DOM | `Web Worker` + `logic/` SDK |
-| Native 中转 | 微信客户端 | `native/` 这个 Web 应用 |
-| WeixinJSBridge | iOS messageHandlers / Android @JavascriptInterface | `window.JSBridge` 对象 + `mitt` 事件总线 |
-| 小程序编译产物 | `WAService.js` / `WAWebview.js` / `app-service.js` | `compile/` 包输出的 `logic.js` / `view.js` / `style.css` / `config.json` |
-| Exparser（仿 Shadow DOM） | 微信基础库自研组件系统 | Vue 2 + 自定义 `<ui-view>` 组件（教学简化版）|
-| PageFrame | 预热页面容器 | `native/pageframe/index.html` 预加载 Vue + ui SDK + components |
-| `App()` / `Page()` 全局 | JSCore 全局注入 | `logic/src/globalApi/index.js` 挂到 `global` 上 |
-| `setData` 跨线程 | WeixinJSBridge.publish | `message.send({type:'updateModule'})` |
+| 博客里的概念              | 真机实现                                           | 这里的对应                                                               |
+| ------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------ |
+| 渲染线程（WebView）       | iOS WKWebView / Android XWeb                       | `<iframe>` + `ui/` SDK                                                   |
+| 逻辑线程（JSCore/V8）     | 独立 JS 引擎，无 DOM                               | `Web Worker` + `logic/` SDK                                              |
+| Native 中转               | 微信客户端                                         | `native/` 这个 Web 应用                                                  |
+| WeixinJSBridge            | iOS messageHandlers / Android @JavascriptInterface | `window.JSBridge` 对象 + `mitt` 事件总线                                 |
+| 小程序编译产物            | `WAService.js` / `WAWebview.js` / `app-service.js` | `compile/` 包输出的 `logic.js` / `view.js` / `style.css` / `config.json` |
+| Exparser（仿 Shadow DOM） | 微信基础库自研组件系统                             | Vue 2 + 自定义 `<ui-view>` 组件（教学简化版）                            |
+| PageFrame                 | 预热页面容器                                       | `native/pageframe/index.html` 预加载 Vue + ui SDK + components           |
+| `App()` / `Page()` 全局   | JSCore 全局注入                                    | `logic/src/globalApi/index.js` 挂到 `global` 上                          |
+| `setData` 跨线程          | WeixinJSBridge.publish                             | `message.send({type:'updateModule'})`                                    |
 
 ## 仓库结构
 
@@ -59,12 +59,12 @@ miniapp-decoded/
 
 ## 端口布局
 
-| 服务 | 端口 | 作用 |
-|---|---|---|
-| `native` | 3077 | 入口页面、pageframe、小程序资源（`/mini_resource/:appId/`） |
-| `logic_sdk` | 3100 | 逻辑层基础 SDK（给 Worker fetch 用） |
-| `ui_sdk` | 3200 | 渲染层基础 SDK（给 iframe 用 `<script>` 引入） |
-| `components` | 3600 | Vue.js 运行时 + `<ui-view>` 组件 |
+| 服务         | 端口 | 作用                                                        |
+| ------------ | ---- | ----------------------------------------------------------- |
+| `native`     | 3077 | 入口页面、pageframe、小程序资源（`/mini_resource/:appId/`） |
+| `logic_sdk`  | 3100 | 逻辑层基础 SDK（给 Worker fetch 用）                        |
+| `ui_sdk`     | 3200 | 渲染层基础 SDK（给 iframe 用 `<script>` 引入）              |
+| `components` | 3600 | Vue.js 运行时 + `<ui-view>` 组件                            |
 
 跨端口通信都走 `window.postMessage`（主线程↔iframe）和 `worker.postMessage`（主线程↔Worker）。
 
@@ -90,18 +90,59 @@ miniapp-decoded/
   │   → 渲染层重渲染                              │
 ```
 
+运行图：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              native (模拟微信客户端)                              │
+│                                                                                  │
+│   职责：管理小程序生命周期、视图栈、Bridge 消息转发                                  │
+│                                                                                  │
+│   ┌────────────────────────────────────────────────────────────────────────┐    │
+│   │                        Bridge (通信桥)                                  │    │
+│   │                                                                         │    │
+│   │   职责：连接 JSCore ↔ WebView，双向消息转发                              │    │
+│   └──────────────────────────┬─────────────────────────┬────────────────────┘    │
+│                              │                         │                         │
+│              ┌───────────────┴───────────────┐         │                         │
+│              ▼                               ▼         ▼                         │
+│   ┌─────────────────────────────┐  ┌──────────────────────────────────────┐     │
+│   │  JSCore (Worker 线程)       │  │  WebView (iframe)                     │     │
+│   │                             │  │                                       │     │
+│   │  运行 logic 包              │  │  运行 ui 包 + components 包           │     │
+│   │  - App()/Page() API        │  │  - Vue 框架                           │     │
+│   │  - 生命周期管理             │  │  - 页面渲染                            │     │
+│   │  - setData 发送             │  │  - setData 接收 (Vue.set)             │     │
+│   │  - 事件回调执行             │  │  - 事件捕获上报                        │     │
+│   │                             │  │                                       │     │
+│   │  + 用户代码 (logic.js)      │  │  + 用户代码 (view.js + style.css)     │     │
+│   └─────────────────────────────┘  └──────────────────────────────────────┘     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+                                      ▲
+                                      │ 编译产物
+                                      │
+┌─────────────────────────────────────┴────────────────────────────────────────────┐
+│                              compile (编译器)                                     │
+│                                                                                   │
+│   输入：wxml / wxss / js / json (开发者源码)                                       │
+│   输出：view.js / style.css / logic.js / config.json                              │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
 ## 命令清单
 
-| 命令 | 作用 |
-|---|---|
-| `pnpm install` | 安装依赖（pnpm workspace 会自动去重 webpack/babel 等重复依赖） |
-| `pnpm start` | **推荐**：自动 build + serve + 打开浏览器 |
-| `pnpm build` | 只编译所有子包 |
-| `pnpm dev` | 监听所有子包源码，webpack watch 模式 |
-| `pnpm serve` | 只启服务（不 build） |
+| 命令                | 作用                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------ |
+| `pnpm install`      | 安装依赖（pnpm workspace 会自动去重 webpack/babel 等重复依赖）                                         |
+| `pnpm start`        | **推荐**：自动 build + serve + 打开浏览器                                                              |
+| `pnpm build`        | 只编译所有子包                                                                                         |
+| `pnpm dev`          | 监听所有子包源码，webpack watch 模式                                                                   |
+| `pnpm serve`        | 只启服务（不 build）                                                                                   |
 | `pnpm compile:demo` | 演示"编译器"：把 `native/apps/douyin-src/` 的 wxml/wxss/js 编译成 `native/apps/douyin/` 里的运行时产物 |
-| `pnpm clean` | 清理所有产物目录 |
-| `pnpm clean:all` | 连 `node_modules` 一起清 |
+| `pnpm clean`        | 清理所有产物目录                                                                                       |
+| `pnpm clean:all`    | 连 `node_modules` 一起清                                                                               |
 
 ## 想深入学什么？
 
@@ -170,15 +211,15 @@ miniapp-decoded/
 
 ### 一张表总结
 
-| 特性 | 真机 | 本项目 | 原因 |
-|---|---|---|---|
-| 渲染层 | Exparser | Vue 2 | 复现成本极高，偏离教学目标 |
-| setData | diff + patch | 整份覆盖 | 对理解消息流无增量收益 |
-| 跨线程通信 | JSON 序列化 + Native Bridge | postMessage / 直接调函数 | 同源 iframe 下直接调更直观 |
-| 进程隔离 | WebView / JSCore 分进程 | 同进程 | 浏览器平台不提供该能力 |
-| `wx.*` API | 宿主客户端实现 | 未实现 | 是独立话题，混讲反而讲不清 |
-| 组件 / 指令 | 全量 | 仅 `<view>` + `bindtap` | 边际收益递减 |
-| Skyline | 原生渲染管线 | 不模拟 | Web 平台无对等能力 |
+| 特性        | 真机                        | 本项目                   | 原因                       |
+| ----------- | --------------------------- | ------------------------ | -------------------------- |
+| 渲染层      | Exparser                    | Vue 2                    | 复现成本极高，偏离教学目标 |
+| setData     | diff + patch                | 整份覆盖                 | 对理解消息流无增量收益     |
+| 跨线程通信  | JSON 序列化 + Native Bridge | postMessage / 直接调函数 | 同源 iframe 下直接调更直观 |
+| 进程隔离    | WebView / JSCore 分进程     | 同进程                   | 浏览器平台不提供该能力     |
+| `wx.*` API  | 宿主客户端实现              | 未实现                   | 是独立话题，混讲反而讲不清 |
+| 组件 / 指令 | 全量                        | 仅 `<view>` + `bindtap`  | 边际收益递减               |
+| Skyline     | 原生渲染管线                | 不模拟                   | Web 平台无对等能力         |
 
 > 一句话：**这个 demo 用来理解"为什么小程序是双线程、为什么 setData 异步、为什么要 PageFrame 预热"是够的；用来分析"小程序为什么快/慢"则不够——那些问题的答案藏在被省略的部分里。**
 

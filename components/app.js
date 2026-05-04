@@ -11,5 +11,5 @@ app.use('/lib', express.static(path.join(__dirname, 'lib')));
 app.use('/components', express.static(path.join(__dirname, 'public')));
 
 app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`);
+  console.log(`Example app listening on port ${port}`);
 });
