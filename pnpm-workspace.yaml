@@ -1,0 +1,6 @@
+packages:
+  - 'native'
+  - 'logic'
+  - 'ui'
+  - 'components'
+  - 'compile'

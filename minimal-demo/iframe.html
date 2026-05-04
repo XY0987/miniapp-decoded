@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Document</title>
+	<style>
+		p {
+			padding: 10px;
+			border: 1px solid #ddd;
+		}
+	</style>
+</head>
+<body>
+	<button id="button">更新文案</button>
+	<p id="text"></p>
+	<script type="text/javascript">
+		const button = document.getElementById('button');
+		const p = document.getElementById('text');
+
+		button.onclick = function() {
+			window.JSBridge.onReceiveWebviewMessage('updateData');
+		}
+
+		// 接收来自native的消息
+		window.JSBridge.onReceiveNativeMessage = function(msg) {
+			console.log('webview收到消息:', msg);
+			p.innerHTML = msg;
+		};
+	</script>
+</body>
+</html>

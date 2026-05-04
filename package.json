@@ -1,0 +1,31 @@
+{
+  "name": "miniapp-decoded",
+  "version": "1.0.0",
+  "private": true,
+  "description": "用 Web 技术栈还原微信小程序双线程架构：Worker 当 JSCore，iframe 当 WebView，Native 层做消息中转。",
+  "scripts": {
+    "postinstall": "echo 'Tip: run `pnpm start` to launch the whole mini-program simulator.'",
+    "clean": "rimraf native/public logic/public ui/public components/public components/lib native/apps/douyin/__compiled__ node_modules/.cache",
+    "clean:all": "pnpm -r exec rimraf public lib build/output node_modules && rimraf node_modules",
+    "build:components": "pnpm --filter components run build",
+    "build:ui": "pnpm --filter ui_sdk run build",
+    "build:logic": "pnpm --filter logic_sdk run build",
+    "build:native": "pnpm --filter native run build",
+    "build:vendor": "node scripts/prepare-vendor.js",
+    "build": "pnpm run build:vendor && pnpm run build:components && pnpm run build:ui && pnpm run build:logic && pnpm run build:native",
+    "dev": "concurrently -k -n components,ui,logic,native -c magenta,cyan,yellow,green \"pnpm --filter components run dev\" \"pnpm --filter ui_sdk run dev\" \"pnpm --filter logic_sdk run dev\" \"pnpm --filter native run dev\"",
+    "serve": "concurrently -k -n srv-native,srv-ui,srv-logic,srv-components -c blue,cyan,yellow,magenta \"pnpm --filter native run serve\" \"pnpm --filter ui_sdk run serve\" \"pnpm --filter logic_sdk run serve\" \"pnpm --filter components run serve\"",
+    "start": "node scripts/start.js",
+    "compile:demo": "node scripts/compile-demo.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "open": "^8.4.2",
+    "rimraf": "^5.0.5",
+    "wait-on": "^7.2.0"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "packageManager": "pnpm@8.15.4"
+}
