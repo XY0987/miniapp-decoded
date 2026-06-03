@@ -144,6 +144,231 @@ miniapp-decoded/
 | `pnpm clean`        | 清理所有产物目录                                                                                       |
 | `pnpm clean:all`    | 连 `node_modules` 一起清                                                                               |
 
+## 源码阅读指南
+
+> 这个项目有 5 个包，初次看容易迷路。本节帮你理清**包之间的关系**、**构建如何串联**、以及**推荐的阅读顺序**。
+
+### 各包的角色与关系
+
+```
+                          ┌────────────────────────────────┐
+                          │       compile（编译器）          │
+                          │                                │
+                          │  wxml/wxss/js/json → 运行时产物 │
+                          └────────────────┬───────────────┘
+                                           │ 编译产物存放于
+                                           ▼ native/apps/douyin/
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        native（原生容器 - 端口 3077）                          │
+│                                                                              │
+│  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓  │
+│  ┃ 静态服务路由：                                                          ┃  │
+│  ┃   /native        → native/public/     (入口页面)                        ┃  │
+│  ┃   /page_frame    → native/pageframe/  (iframe 模板)                     ┃  │
+│  ┃   /mini_resource → native/apps/       (小程序编译产物)                   ┃  │
+│  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛  │
+│                                                                              │
+│         ┌──── fetch ──────────────┐   ┌──── iframe src ───────────────┐     │
+│         ▼                         │   ▼                               │     │
+│  ┌─────────────────┐              │  ┌───────────────────────────────┐│     │
+│  │  Worker (JSCore) │              │  │  iframe (WebView)             ││     │
+│  │                  │              │  │                               ││     │
+│  │  ┌────────────┐ │              │  │  pageframe/index.html 加载:   ││     │
+│  │  │ logic SDK  │ │◄── port:3100 │  │  ├── vue.js     ← port:3600  ││     │
+│  │  │ (core.js)  │ │              │  │  ├── components ← port:3600  ││     │
+│  │  ├────────────┤ │              │  │  └── ui SDK     ← port:3200  ││     │
+│  │  │ 用户代码   │ │◄── port:3077 │  │                               ││     │
+│  │  │ (logic.js) │ │  /mini_res.  │  │  运行时再加载:                 ││     │
+│  │  └────────────┘ │              │  │  ├── view.js    ← port:3077  ││     │
+│  └─────────────────┘              │  │  └── style.css  ← port:3077  ││     │
+│                                   │  │       (/mini_resource/...)     ││     │
+│                                   │  └───────────────────────────────┘│     │
+│                                   │                                    │     │
+└───────────────────────────────────┴────────────────────────────────────┘     │
+                                                                               │
+┌──────────────────────────────────────────────────────────────────────────────┘
+│
+│  各包构建产物 & 服务：
+│
+│  ┌─────────────────────────────────────────────────────────────────────────┐
+│  │ logic（逻辑层 SDK - 端口 3100）                                          │
+│  │   构建: src/index.js → public/core.js                                   │
+│  │   服务: GET /logic/core.js                                              │
+│  │   作用: 提供 App()/Page() 全局API + 消息处理 + 生命周期管理              │
+│  ├─────────────────────────────────────────────────────────────────────────┤
+│  │ ui（渲染层 SDK - 端口 3200）                                             │
+│  │   构建: src/index.js → public/core.js                                   │
+│  │   服务: GET /ui_sdk/core.js                                             │
+│  │   作用: 提供 JSBridge + 消息处理 + Vue 实例创建 + setData 接收           │
+│  ├─────────────────────────────────────────────────────────────────────────┤
+│  │ components（组件库 - 端口 3600）                                          │
+│  │   构建: src/index.js → public/js/index.js + public/css/index.css        │
+│  │   服务: GET /components/* + GET /lib/vue.js                             │
+│  │   作用: 注册 <ui-view> 等 Vue 组件 + 提供 Vue 运行时                    │
+│  └─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 构建顺序与依赖链
+
+执行 `pnpm build` 时，各包按以下顺序构建（也是它们的依赖关系）：
+
+```
+① prepare-vendor    从 node_modules 拷贝 vue.js → components/lib/vue.js
+        │
+        ▼
+② build:components  components/src → components/public/
+        │            (渲染层 iframe 需要先加载组件库)
+        ▼
+③ build:ui          ui/src → ui/public/core.js
+        │            (渲染层 iframe 需要加载 ui SDK)
+        ▼
+④ build:logic       logic/src → logic/public/core.js
+        │            (Worker 需要加载 logic SDK)
+        ▼
+⑤ build:native      native/src → native/public/
+                     (入口页面，需等其他服务都能提供产物)
+```
+
+**注意**：各包在**编译时**没有互相 import（它们是独立的 webpack 构建），但在**运行时**通过 HTTP 请求互相加载对方的产物。这是理解项目的关键！
+
+### 运行时加载顺序（一次小程序启动的完整链路）
+
+```
+时间线 ──────────────────────────────────────────────────────────────────────────►
+
+1. 浏览器打开 http://127.0.0.1:3077/native/index.html
+   └── 加载 native/public/js/index.js（native 主逻辑）
+
+2. native 初始化
+   └── Device → Application → 展示 Home 页 → 用户点击小程序图标
+
+3. 创建 MiniAppSandbox
+   ├── 创建 Bridge（通信桥梁）
+   ├── 创建 JSCore（Worker）
+   │   └── fetch("http://127.0.0.1:3100/logic/core.js") → Blob → new Worker()
+   │       └── Worker 启动后执行 logic SDK:
+   │           ├── globalApi.init() → 注入 global.App() / global.Page()
+   │           └── messageManager.init() → 开始监听消息
+   │
+   └── 创建 WebView（iframe）
+       └── src = "http://127.0.0.1:3077/page_frame/"
+           └── pageframe/index.html 加载:
+               ├── <script src="http://127.0.0.1:3600/lib/vue.js">
+               ├── <script src="http://127.0.0.1:3600/components/js/index.js">
+               ├── <script src="http://127.0.0.1:3200/ui_sdk/core.js">
+               │   └── ui SDK 启动:
+               │       ├── globalApi.init() → 注入 window.Page()
+               │       └── messageManager.init() → 监听 JSBridge 消息
+               └── <link href="http://127.0.0.1:3600/components/css/index.css">
+
+4. Bridge.start()（三端就绪，开始协作）
+   ├──► Worker:  "loadResource" → importScripts("/mini_resource/douyin/logic.js")
+   │    └── logic.js 执行 App({...}) 和 Page({...}) → 模块注册
+   │
+   ├──► iframe:  "loadResource" → <script src="/mini_resource/douyin/view.js">
+   │    └── view.js 执行 Page({path, render}) → 渲染模块注册
+   │    └── <link href="/mini_resource/douyin/style.css"> → 样式注入
+   │
+   └── 资源就绪 → createApp → createPage → onLoad → setData → 渲染
+```
+
+### 推荐阅读顺序
+
+根据上面的架构理解，建议按以下顺序阅读源码：
+
+#### 第一步：从最简骨架理解核心原理（30 分钟）
+
+| 序号 | 文件            | 看什么                                                      |
+| ---- | --------------- | ----------------------------------------------------------- |
+| 1    | `minimal-demo/` | 抛开所有 SDK，只有 Worker + iframe + postMessage 的最小实现 |
+
+#### 第二步：理解 Native 如何把两端串起来（1 小时）
+
+| 序号 | 文件                                               | 看什么                                                |
+| ---- | -------------------------------------------------- | ----------------------------------------------------- |
+| 2    | `native/app.js`                                    | 静态服务路由配置，理解各端口的资源从哪来              |
+| 3    | `native/pageframe/index.html`                      | iframe 的 HTML 模板，看它加载了哪些外部脚本           |
+| 4    | `native/src/index.js`                              | Native 入口，初始化流程                               |
+| 5    | `native/src/core/jscore/index.js`                  | 如何用 Worker 模拟 JSCore                             |
+| 6    | `native/src/core/webview/webview.js`               | 如何用 iframe 模拟 WebView                            |
+| 7    | `native/src/core/bridge/index.js`                  | **重点！** 消息如何在 Worker ↔ Native ↔ iframe 间流转 |
+| 8    | `native/src/core/miniAppSandbox/miniAppSandbox.js` | Bridge + JSCore + WebView 如何组装                    |
+
+#### 第三步：理解逻辑层 SDK 内部（40 分钟）
+
+| 序号 | 文件                                | 看什么                                      |
+| ---- | ----------------------------------- | ------------------------------------------- |
+| 9    | `logic/src/index.js`                | SDK 入口，就两行：注入 API + 启动消息监听   |
+| 10   | `logic/src/globalApi/index.js`      | `global.App()` / `global.Page()` 是怎么来的 |
+| 11   | `logic/src/message/index.js`        | Worker 中 `global.postMessage` 的封装       |
+| 12   | `logic/src/messageManager/index.js` | 消息路由：收到什么类型做什么事              |
+| 13   | `logic/src/loader/index.js`         | `importScripts(logic.js)` 在这里发生        |
+| 14   | `logic/src/runtimeManager/Page.js`  | **重点！** setData 的实现                   |
+
+#### 第四步：理解渲染层 SDK 内部（40 分钟）
+
+| 序号 | 文件                             | 看什么                                                   |
+| ---- | -------------------------------- | -------------------------------------------------------- |
+| 15   | `ui/src/index.js`                | 入口，和 logic 的结构一一对应                            |
+| 16   | `ui/src/message/index.js`        | iframe 中通过 `window.JSBridge` 接收消息                 |
+| 17   | `ui/src/messageManager/index.js` | 消息路由                                                 |
+| 18   | `ui/src/loader/index.js`         | 动态创建 `<script>` / `<link>` 加载 view.js 和 style.css |
+| 19   | `ui/src/runtimeManager/index.js` | **重点！** `Vue.set()` 更新数据，触发重渲染              |
+
+#### 第五步：理解组件如何工作（20 分钟）
+
+| 序号 | 文件                            | 看什么                                     |
+| ---- | ------------------------------- | ------------------------------------------ |
+| 20   | `components/src/index.js`       | 组件注册入口                               |
+| 21   | `components/src/view/index.js`  | `<ui-view>` 组件定义                       |
+| 22   | `components/src/proxy/index.js` | **重点！** bindtap 事件如何冒泡到 JSBridge |
+
+#### 第六步：理解编译器如何把源码变成产物（30 分钟）
+
+| 序号 | 文件                                | 看什么                                                    |
+| ---- | ----------------------------------- | --------------------------------------------------------- |
+| 23   | `compile/src/commanders/build.js`   | 编译总流程                                                |
+| 24   | `compile/src/compile/js/index.js`   | JS 编译：包装成 `modDefine` AMD 模块                      |
+| 25   | `compile/src/compile/wxml/index.js` | WXML 编译：标签转换 → Vue template compiler → render 函数 |
+| 26   | `compile/src/compile/wxss/index.js` | WXSS 编译：rpx→rem + scoped 样式                          |
+
+### 各包源码结构对照
+
+logic 和 ui 这两个 SDK 的内部结构是**镜像对称**的，这不是巧合——它们分别是双线程架构的两侧：
+
+```
+logic/src/                          ui/src/
+├── index.js         (入口)         ├── index.js         (入口)
+├── globalApi/       (注入 API)     ├── globalApi/       (注入 API)
+│   └── index.js     App()/Page()   │   └── index.js     Page()
+├── message/         (通信底层)     ├── message/         (通信底层)
+│   └── index.js     postMessage    │   └── index.js     JSBridge
+├── messageManager/  (消息路由)     ├── messageManager/  (消息路由)
+│   └── index.js     分发消息       │   └── index.js     分发消息
+├── loader/          (资源加载)     ├── loader/          (资源加载)
+│   └── index.js     importScripts  │   └── index.js     <script>/<link>
+└── runtimeManager/  (运行时)       └── runtimeManager/  (运行时)
+    ├── index.js     管理实例           └── index.js     Vue 实例管理
+    ├── App.js       App 类
+    └── Page.js      Page 类(setData)
+```
+
+### 关键设计理解
+
+**Q: 为什么各包之间没有 import，却能协作？**
+
+A: 这正是小程序双线程架构的核心设计！各端的代码运行在**完全隔离的 JS 上下文**中：
+
+- `logic SDK` → Worker（无 DOM，无 window）
+- `ui SDK` → iframe（独立窗口上下文）
+- `native` → 主页面
+
+它们之间**唯一的联系**就是 `postMessage`。这种设计也体现在构建上：每个包独立 webpack 打包，不互相 import，运行时通过 HTTP 加载对方产物 + 消息通信协作。
+
+**Q: `compile` 包生成的产物如何被其他包消费？**
+
+A: `compile` 的产物（logic.js / view.js / style.css / config.json）存放在 `native/apps/<appId>/` 目录下，由 native 的静态服务通过 `/mini_resource/<appId>/` 路由对外提供。Worker 通过 `importScripts()` 加载 logic.js，iframe 通过 `<script>`/`<link>` 加载 view.js 和 style.css。
+
 ## 想深入学什么？
 
 - 点击如何跨两个线程 → 看 `native/src/core/bridge/index.js`
