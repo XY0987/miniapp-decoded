@@ -40,6 +40,19 @@ class GlobalApi {
     global.Page = (moduleInfo, compileInfo) => {
       loader.createPageModule(moduleInfo, compileInfo);
     };
+
+    /**
+     * wx - 微信原生 API 对象（测试 demo）
+     * 真机中由 WAService.js 注入，包含几百个 API
+     * 这里仅做一个 showToast 的简单模拟，演示注入位置和通信链路
+     */
+    global.wx = {
+      showToast({ title = '', icon = 'success', duration = 1500 } = {}) {
+        console.log(`[wx.showToast] title: "${title}", icon: ${icon}, duration: ${duration}ms`);
+        // 真机实现：通过 Bridge 发给 Native，由客户端弹出原生 Toast
+        // 这里仅打印日志演示调用链路
+      },
+    };
   }
 }
 

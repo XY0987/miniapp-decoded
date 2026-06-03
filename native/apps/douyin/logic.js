@@ -19,6 +19,7 @@ Page(
     onLoad: function (options) {
       // 页面创建时执行
       console.log('抖音首页 page onLoad: ', options);
+      wx.showToast({ title: '我是tost' });
     },
     onShow: function () {
       // 页面出现在前台时执行
