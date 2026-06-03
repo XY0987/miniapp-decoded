@@ -2,7 +2,7 @@
 
 > 用 Web 技术栈还原微信小程序的双线程架构：**Web Worker 当 JSCore，iframe 当 WebView，一个主页面当 Native**。
 >
-> 配套博客：《微信小程序底层原理深解：从双线程架构到 Skyline 渲染引擎》。
+> 配套博客：[《微信小程序底层原理深解：从双线程架构到 Skyline 渲染引擎》](https://xy0987.github.io/posts/02-%E5%BE%AE%E4%BF%A1%E5%B0%8F%E7%A8%8B%E5%BA%8F%E5%BA%95%E5%B1%82%E5%8E%9F%E7%90%86-%E4%BB%8E%E5%8F%8C%E7%BA%BF%E7%A8%8B%E5%88%B0Skyline/)
 
 ## 一分钟跑起来
 
