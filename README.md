@@ -244,33 +244,62 @@ miniapp-decoded/
 
 3. 创建 MiniAppSandbox
    ├── 创建 Bridge（通信桥梁）
-   ├── 创建 JSCore（Worker）
-   │   └── fetch("http://127.0.0.1:3100/logic/core.js") → Blob → new Worker()
-   │       └── Worker 启动后执行 logic SDK:
-   │           ├── globalApi.init() → 注入 global.App() / global.Page()
-   │           └── messageManager.init() → 开始监听消息
    │
-   └── 创建 WebView（iframe）
+   ├── 创建 JSCore（Worker）─── 逻辑线程，无 DOM，只跑 JS
+   │   └── fetch("http://127.0.0.1:3100/logic/core.js") → Blob → new Worker()
+   │
+   │       ┌─────────────────────────────────────────────────────────────┐
+   │       │ ① 平台侧 SDK（logic/core.js - 类似真机的 WAService.js）    │
+   │       │    ├── globalApi.init()                                     │
+   │       │    │   └── 注入 global.App() / global.Page() 全局 API      │
+   │       │    ├── messageManager.init()                                │
+   │       │    │   └── 监听消息，路由到对应处理函数                      │
+   │       │    └── runtimeManager                                       │
+   │       │        └── 管理 App/Page 实例、生命周期调度、setData 发送    │
+   │       │                                                             │
+   │       │ ② 用户代码（稍后通过 importScripts 加载 logic.js）          │
+   │       │    └── 用户编写的 App({...}) / Page({data, onLoad, ...})    │
+   │       │        调用 SDK 注入的全局 API，注册到 runtimeManager       │
+   │       └─────────────────────────────────────────────────────────────┘
+   │
+   └── 创建 WebView（iframe）─── 渲染线程，有 DOM，负责 UI 展示
        └── src = "http://127.0.0.1:3077/page_frame/"
-           └── pageframe/index.html 加载:
-               ├── <script src="http://127.0.0.1:3600/lib/vue.js">
-               ├── <script src="http://127.0.0.1:3600/components/js/index.js">
-               ├── <script src="http://127.0.0.1:3200/ui_sdk/core.js">
-               │   └── ui SDK 启动:
-               │       ├── globalApi.init() → 注入 window.Page()
-               │       └── messageManager.init() → 监听 JSBridge 消息
-               └── <link href="http://127.0.0.1:3600/components/css/index.css">
+
+           ┌─────────────────────────────────────────────────────────────┐
+           │ ① 平台侧 SDK（pageframe/index.html 预加载）                │
+           │    ├── vue.js (← port:3600)                                │
+           │    │   └── 渲染引擎（真机是 Exparser，这里用 Vue 模拟）     │
+           │    ├── components/js/index.js (← port:3600)                │
+           │    │   └── 基础组件注册（<ui-view> 等 + 事件代理）          │
+           │    ├── components/css/index.css (← port:3600)              │
+           │    │   └── 基础组件样式                                     │
+           │    └── ui_sdk/core.js (← port:3200)                        │
+           │        ├── globalApi.init() → 注入 window.Page()           │
+           │        ├── messageManager.init() → 监听 JSBridge 消息      │
+           │        └── runtimeManager → Vue 实例管理 + setData 接收    │
+           │                                                             │
+           │ ② 用户代码（稍后通过动态 <script>/<link> 加载）             │
+           │    ├── view.js  → 用户编写的页面模板（编译成 render 函数）  │
+           │    └── style.css → 用户编写的页面样式（rpx→rem 编译后）     │
+           └─────────────────────────────────────────────────────────────┘
 
 4. Bridge.start()（三端就绪，开始协作）
-   ├──► Worker:  "loadResource" → importScripts("/mini_resource/douyin/logic.js")
-   │    └── logic.js 执行 App({...}) 和 Page({...}) → 模块注册
    │
-   ├──► iframe:  "loadResource" → <script src="/mini_resource/douyin/view.js">
-   │    └── view.js 执行 Page({path, render}) → 渲染模块注册
-   │    └── <link href="/mini_resource/douyin/style.css"> → 样式注入
+   ├──► 向 JSCore 发送 "loadResource"
+   │    └── Worker 执行 importScripts("/mini_resource/douyin/logic.js")
+   │        └── 用户代码里的 App({...}) / Page({...}) 被调用
+   │            → 通过 SDK 注入的全局 API 注册到 runtimeManager
    │
-   └── 资源就绪 → createApp → createPage → onLoad → setData → 渲染
+   ├──► 向 WebView 发送 "loadResource"
+   │    ├── 动态创建 <script src="/mini_resource/douyin/view.js">
+   │    │   └── 用户的页面模板（render 函数）注册到渲染层 runtimeManager
+   │    └── 动态创建 <link href="/mini_resource/douyin/style.css">
+   │        └── 用户样式注入页面
+   │
+   └── 资源就绪 → createApp → createPage → onLoad → setData → 首屏渲染
 ```
+
+**总结**：每个线程都是「平台 SDK 先行 + 用户代码后载」的两段式加载。SDK 提供基础能力（API 注入、消息通信、生命周期管理），用户代码调用这些能力来注册自己的业务逻辑。两者缺一不可——SDK 是骨架，用户代码是血肉。
 
 ### 推荐阅读顺序
 
